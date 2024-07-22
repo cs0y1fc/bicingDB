@@ -83,60 +83,43 @@ select * from tiempo_uso;
 select * from usuario;
 
 -- 	4- Procedure para generar reporte de ingresos mensuales. (1 punto)
-	
-USE bicingBCN;
-
--- Añadir la columna Fecha_servicio
-ALTER TABLE Servicio
-ADD COLUMN Fecha_servicio DATETIME;
-
--- Actualizar registros existentes con fechas y horas específicas
-
-UPDATE Servicio
-SET Fecha_servicio = '2023-07-01 10:00:00'
-WHERE Usuario_DNI = '36351423O' AND Codigo_Bici = 'A001';
-
-UPDATE Servicio
-SET Fecha_servicio = '2023-07-02 12:30:00'
-WHERE Usuario_DNI = '27364619Y' AND Codigo_Bici = 'A002';
-
-UPDATE Servicio
-SET Fecha_servicio = '2023-07-03 15:00:00'
-WHERE Usuario_DNI = '36351423O' AND Codigo_Bici = 'A003';
-
-UPDATE Servicio
-SET Fecha_servicio = '2023-07-04 18:45:00'
-WHERE Usuario_DNI = '36351423O' AND Codigo_Bici = 'A002';
-
--- Verificar los cambios
-SELECT * FROM Servicio;
-
-USE bicingBCN;
-
--- Crear el procedimiento para calcular los ingresos mensuales
-drop procedure if exists CalcularIngresosMensuales;
-
-DELIMITER //
+	DELIMITER //
 
 CREATE PROCEDURE CalcularIngresosMensuales()
 BEGIN
+    -- Crear una tabla temporal para almacenar los ingresos mensuales
+    DROP TEMPORARY TABLE IF EXISTS IngresosMensuales;
+    CREATE TEMPORARY TABLE IngresosMensuales (
+        Mes VARCHAR(7),
+        IngresoTotal DECIMAL(10, 2)
+    );
+
+    -- Calcular los ingresos mensuales
+    INSERT INTO IngresosMensuales (Mes, IngresoTotal)
     SELECT 
-        DATE_FORMAT(Fecha_servicio, '%Y-%m') AS Mes,
-        SUM(Precio_tarifa + Suma_penalizacion) AS IngresosMensuales
-    FROM 
-        Servicio
-    GROUP BY 
-        DATE_FORMAT(Fecha_servicio, '%Y-%m')
-    ORDER BY 
-        Mes;
+        DATE_FORMAT(Fecha_fin_servicio, '%Y-%m') AS Mes,
+        SUM(CASE
+            WHEN t.Tipo_Tarifa LIKE 'Tarifa Plana%' THEN t.Precio
+            WHEN t.Tipo_Tarifa LIKE 'Tarifa por Uso%' THEN
+                CASE
+                    WHEN tu.Tiempo_uso <= '00:30:00' THEN 0.35
+                    WHEN tu.Tiempo_uso <= '02:00:00' THEN 0.90
+                    ELSE 5.00
+                END
+            ELSE 0
+        END + tu.Multa) AS IngresoTotal
+    FROM Servicio s
+    JOIN usuario u ON s.usuario_DNI = u.DNI
+    JOIN Tarifa t ON u.IdTarifa = t.idTarifa
+    JOIN Tiempo_uso tu ON s.idTiempo_uso = tu.idTiempo_uso
+    GROUP BY DATE_FORMAT(Fecha_fin_servicio, '%Y-%m');
+
+    -- Seleccionar los resultados
+    SELECT * FROM IngresosMensuales;
 END //
 
 DELIMITER ;
-
-
-
-
-
+call CalcularIngresosMensuales();
 
 
 
@@ -293,3 +276,45 @@ select * from bicicletas;
 -- Crea un evento que se ejecute una vez al año y mueva los registros de alquileres que tengan más de dos años a una tabla de archivo (alquileres_archivo).
 -- Frecuencia: Anual.
 -- Acción: Archivar registros antiguos.
+-- Creacion tabla nueva Alquileres archivados
+CREATE TABLE IF NOT EXISTS alquileres_archivo (
+  idServicio INT NOT NULL,
+  usuario_DNI VARCHAR(9) NOT NULL,
+  bicicletas_Codigo VARCHAR(10) NOT NULL,
+  Fecha_inicio_servicio DATETIME NOT NULL,
+  Fecha_fin_servicio VARCHAR(45) NULL,
+  idTiempo_uso INT NOT NULL,
+  PRIMARY KEY (idServicio)
+) ENGINE = InnoDB;
+DELIMITER //
+
+
+CREATE PROCEDURE ArchivarAlquileresAntiguos()
+BEGIN
+  -- Insertar los registros antiguos en la tabla de archivo
+  INSERT INTO alquileres_archivo (idServicio, usuario_DNI, bicicletas_Codigo, Fecha_inicio_servicio, Fecha_fin_servicio, idTiempo_uso)
+  SELECT idServicio, usuario_DNI, bicicletas_Codigo, Fecha_inicio_servicio, Fecha_fin_servicio, idTiempo_uso
+  FROM Servicio
+  WHERE Fecha_fin_servicio < DATE_SUB(NOW(), INTERVAL 2 YEAR);
+  
+  -- Eliminar los registros antiguos de la tabla original
+  DELETE FROM Servicio
+  WHERE Fecha_fin_servicio < DATE_SUB(NOW(), INTERVAL 2 YEAR);
+END //
+
+DELIMITER ;
+
+-- Crear el evento naul de Inserción de los valores que tengan mas de 2 años
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS ArchivarAlquileresAnualmente
+ON SCHEDULE
+  EVERY 1 YEAR
+  STARTS '2024-01-01 00:00:00'
+DO
+  CALL ArchivarAlquileresAntiguos();
+
+DELIMITER ;
+
+
+
