@@ -160,15 +160,15 @@ for each row
 begin 
 	declare estado_bici varchar (15);
     set estado_bici = (select Estado from bicicletas where Codigo = NEW.bicicletas_Codigo);
-    SET @skip_devolucion_bici = 1; -- Variable para que funcione el trigger devolucion_bici
+    SET @skip_devolucion_bici = 1; -- Variable necesaria si se tiene el trigger 'devolucion_bici' y este activados a la vez
     
+    -- En el caso de que la bici este disponible se podra alquilar y parasara 'en uso'. Tambien se crea una fila en la tabla servicio y en la tabla tiempo_uso
 	if estado_bici like 'Disponible' then
 		INSERT INTO servicio values (default,NEW.usuario_DNI,NEW.bicicletas_Codigo,NEW.Fecha_inicio_solicitud,NULL,1);
-        SET @last_id = (Select idServicio from servicio where usuario_DNI = NEW.usuario_DNI order by idServicio desc limit 1);
+        SET @last_id = (Select idServicio from servicio where usuario_DNI = NEW.usuario_DNI order by idServicio desc limit 1); -- Quiero que tanto la id de la tabla 'Servicio' como la tabla 'Tiempo_uso' sean e mismo
         INSERT INTO Tiempo_uso VALUES (@last_id,NULL, NULL);
-        update servicio set idTiempo_uso = @last_id where idServicio = @last_id;
-        update bicicletas set Estado = 'En uso' where Codigo = NEW.bicicletas_Codigo;
-        
+        update servicio set idTiempo_uso = @last_id where idServicio = @last_id; 
+        update bicicletas set Estado = 'En_uso' where Codigo = NEW.bicicletas_Codigo;
 	end if;
     
     SET @skip_devolucion_bici = NULL;
@@ -182,7 +182,6 @@ Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB
 Insert into solicitud_uso_bicicleta values (default,'45678901D','B001', DATE_SUB(NOW(), INTERVAL 20 MINUTE));
 Insert into solicitud_uso_bicicleta values (default,'45678901D','B004', NOW());
 
-Select * from control_de_triggers;
 select * from servicio;
 select * from tiempo_uso;
 select * from bicicletas;
@@ -200,22 +199,26 @@ after update on servicio
 for each row
 begin 
 	
-    declare tarifa_usuario int; -- Obtener la tarifa que usa el usuario
-	declare tiempo_bici_fuera time; -- Obtener la diferencia de tiempo entre el inicio y la finalizacion del uso de vici
+    declare tarifa_usuario int; -- Obtener el tipo de tarifa que usa el usuario para ver que multa se le aplicara
+	declare tiempo_bici_fuera time; -- Obtener la diferencia de tiempo entre el inicio y la finalizacion del uso de la bici
     declare tiempo_bici_alquilada decimal (20,2); -- Variable de tiempo en decimal para poder calcular en el caso de que supere las 2 horas
     
 	IF @skip_devolucion_bici IS NULL THEN
 
 		set tarifa_usuario = (select IdTarifa from usuario where DNI = new.usuario_DNI);
+        -- tiempo_bici_alquilada esta en formato decimal por lo que es mas sencillo comparar, 0.5 = 30 min,  1 = 1hora
 		set tiempo_bici_fuera = ( (select time(NOW())) - (select TIME(Fecha_inicio_servicio) from servicio where usuario_DNI = new.usuario_DNI order by idServicio desc limit 1));
+        -- tiempo_bici_fuera esta en format hora y es la resta entre la hora actual menos la hora de inicio del servicio
 		set tiempo_bici_alquilada = (TIMESTAMPDIFF (MINUTE, (select TIME(Fecha_inicio_servicio) from servicio where usuario_DNI = new.usuario_DNI order by idServicio desc limit 1),(NOW()))/60);
-    
+		
+        -- Cuando el cliente deja la bicicleta, esta vuelve a estar disponible
 		update bicicletas set Estado = 'Disponible' 
-		where Codigo = (select bicicletas_Codigo from servicio where usuario_DNI = '45678901D' order by idServicio desc limit 1);
-    
+		where Codigo = (select bicicletas_Codigo from servicio where usuario_DNI = new.usuario_DNI order by idServicio desc limit 1);
+		
+        -- Segun el tipo de tarifa se aplicara un tipo de pago, aqui se actualiza 2 campos de la tabla 'tiempo_uso', tanto el tiempo de uso de la bici como la multa aplicada
 		if tarifa_usuario = 1 OR tarifa_usuario = 3 then
-			if tiempo_bici_alquilada <= 0.5 then
-				update tiempo_uso set Tiempo_uso = tiempo_bici_fuera, Multa = 0
+			if tiempo_bici_alquilada <= 0.5 then 
+				update tiempo_uso set Tiempo_uso = tiempo_bici_fuera, Multa = 0 
 				where idtiempo_uso = (select max(idtiempo_uso) from servicio where usuario_DNI = new.usuario_DNI);
 			elseif tiempo_bici_alquilada > 0.50 AND tiempo_bici_alquilada <= 2 then
 				update tiempo_uso set Tiempo_uso = tiempo_bici_fuera, Multa = 0.70
@@ -236,9 +239,11 @@ begin
 				where idtiempo_uso = (select max(idtiempo_uso) from servicio where usuario_DNI = new.usuario_DNI);
 			END IF;
 		END IF;
-
+		
+        -- Variable para coger la multa que se le aplico al cliente
 		SET @Multa = (Select Multa from tiempo_uso t JOIN SERVICIO s on t.idTiempo_uso = s.idTiempo_uso  where s.usuario_DNI = new.usuario_DNI order by s.idServicio desc LIMIT 1);
-
+	
+		-- Se le resta de su saldo
 		update usuario set saldo = saldo - @Multa
 		where DNI = new.usuario_DNI;
     
@@ -249,7 +254,7 @@ delimiter ;
 -- ========================================================================================================================================================
 -- ========================================================================================================================================================
 
-update servicio set Fecha_fin_servicio = now() where idServicio =(select max(idServicio) from servicio where usuario_DNI='12345678A');
+update servicio set Fecha_fin_servicio = now() where idServicio =(select max(idServicio) from servicio where usuario_DNI='45678901D');
 
 select * from usuario;
 select * from servicio;
@@ -276,34 +281,12 @@ SET GLOBAL event_scheduler = On;
 
 -- ========================================================================================================================================================
 -- ========================================================================================================================================================
-drop trigger if exists Alquiler_bicis;
-delimiter //
-create trigger Alquiler_bicis
-after insert on solicitud_uso_bicicleta
-for each row
-begin 
-	declare estado_bici varchar (15);
-    set estado_bici = (select Estado from bicicletas where Codigo = NEW.bicicletas_Codigo);
-    SET @skip_devolucion_bici = 1; -- Variable para que funcione el trigger devolucion_bici
-    
-	if estado_bici like 'Disponible' then
-		INSERT INTO servicio values (default,NEW.usuario_DNI,NEW.bicicletas_Codigo,NEW.Fecha_inicio_solicitud,NULL,1);
-        SET @last_id = (Select idServicio from servicio where usuario_DNI = NEW.usuario_DNI order by idServicio desc limit 1);
-        INSERT INTO Tiempo_uso VALUES (@last_id,NULL, NULL);
-        update servicio set idTiempo_uso = @last_id where idServicio = @last_id;
-        update bicicletas set Estado = 'En uso' where Codigo = NEW.bicicletas_Codigo;
-        
-	end if;
-    
-    SET @skip_devolucion_bici = NULL;
-end //
-delimiter ;
 
--- ========================================================================================================================================================
-
-drop procedure if exists Enviar_la_notificacion;
+DROP EVENT IF EXISTS Notificacion_uso;
 DELIMITER //
-CREATE PROCEDURE Enviar_la_notificacion()
+CREATE EVENT Notificacion_uso
+ON SCHEDULE EVERY 10 minute starts now()
+DO
 BEGIN
 
 	DECLARE done boolean DEFAULT FALSE;
@@ -324,7 +307,7 @@ BEGIN
  		end if;
 
  		IF TIMESTAMPDIFF(MINUTE, v_fecha_inicio, NOW()) >= 20 AND TIMESTAMPDIFF(MINUTE, v_fecha_inicio, NOW()) <= 29 THEN
-			insert into notificaciones values (default,v_usuario_bici, v_bici_usada, 'En 10 min habran pasado los 30 min gratuitos de uso de la bicicleta');
+			insert into notificaciones values (default,v_usuario_bici, v_bici_usada, 'Te quedan menos de 10 min para que se termine los 30 min gratuitos');
         ELSEIF TIMESTAMPDIFF(MINUTE, v_fecha_inicio, NOW()) >= 110 THEN
 			insert into notificaciones values (default,v_usuario_bici, v_bici_usada, 'En 10 min habran pasado 2 horas de uso de la bicicleta');
         end if;
@@ -336,24 +319,15 @@ END //
 DELIMITER ;
 
 -- ========================================================================================================================================================
-
-DROP EVENT IF EXISTS Notificacion_uso;
-CREATE EVENT Notificacion_uso
-ON SCHEDULE EVERY 10 minute starts now()
-DO
-	call Enviar_la_notificacion ();
-
--- ========================================================================================================================================================
 -- ========================================================================================================================================================
 
-Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB(DATE_SUB(NOW(), INTERVAL 3 HOUR), interval 22 MINUTE));
-Insert into solicitud_uso_bicicleta values (default,'45678901D','B001', DATE_SUB(NOW(), INTERVAL 20 MINUTE));
+INSERT INTO Servicio VALUES (default, '12345678A', 'B002', DATE_SUB(DATE_SUB(NOW(), INTERVAL 3 HOUR), interval 22 MINUTE), NULL, 1);
+INSERT INTO Servicio VALUES (default, '45678901D', 'B001', DATE_SUB(NOW(), INTERVAL 20 MINUTE), NULL, 1);
+-- Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB(DATE_SUB(NOW(), INTERVAL 3 HOUR), interval 22 MINUTE));
+-- Insert into solicitud_uso_bicicleta values (default,'45678901D','B001', DATE_SUB(NOW(), INTERVAL 20 MINUTE));
 
 select * from servicio;
-select * from tiempo_uso;
-select * from solicitud_uso_bicicleta;
 select * from notificaciones;
-
 
 -- 2- Evento para archivar alquileres antiguos. (1,5 punto)
 -- Crea un evento que se ejecute una vez al año y mueva los registros de alquileres que tengan más de dos años a una tabla de archivo (alquileres_archivo).
