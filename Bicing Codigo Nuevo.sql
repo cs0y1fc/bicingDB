@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS solicitud_uso_bicicleta (
   usuario_DNI VARCHAR(9) NOT NULL,
   bicicletas_Codigo VARCHAR(10) NOT NULL,
   Fecha_inicio_solicitud DATETIME NOT NULL,
+  Aprobacion ENUM ('Aprobado', 'Denegado') NULL,
   PRIMARY KEY (idSolicitud),
   CONSTRAINT fk_solicitud_usuario1
     FOREIGN KEY (usuario_DNI)
@@ -129,6 +130,15 @@ CREATE TABLE IF NOT EXISTS Notificaciones (
   Usuario_DNI VARCHAR(9) NOT NULL,
   Bicicleta varchar(10) NOT NULL,
   Mensaje TEXT NOT NULL
+) ENGINE = InnoDB;
+
+CREATE TABLE IF NOT EXISTS alquileres_archivo (
+  idServicio INT NOT NULL,
+  usuario_DNI VARCHAR(9) NOT NULL,
+  bicicletas_Codigo VARCHAR(10) NOT NULL,
+  Fecha_inicio_servicio DATETIME NOT NULL,
+  aprovacion varchar(20) NOT NULL,
+  PRIMARY KEY (idServicio)
 ) ENGINE = InnoDB;
     
 INSERT INTO zona_de_mantenimiento (Nom_Zona) VALUES ('Eixample');

@@ -1,5 +1,6 @@
 SET FOREIGN_KEY_CHECKS = 0; -- quita error 1451
 SET SQL_SAFE_UPDATES = 0; -- quita error 1175
+SET GLOBAL event_scheduler = On;
 
 USE bicingBCN ;
 -- - Ejercicios de Procedures
@@ -175,12 +176,34 @@ begin
 end //
 delimiter ;
 
--- ========================================================================================================================================================
--- ========================================================================================================================================================
-
 Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB(DATE_SUB(NOW(), INTERVAL 3 HOUR), interval 22 MINUTE));
 Insert into solicitud_uso_bicicleta values (default,'45678901D','B001', DATE_SUB(NOW(), INTERVAL 20 MINUTE));
 Insert into solicitud_uso_bicicleta values (default,'45678901D','B004', NOW());
+
+
+-- Metodo para indicar en a tabla si la solicitud ha sido aprobada o no
+drop procedure if exists AprobarSolicitud;
+DELIMITER //
+CREATE PROCEDURE AprobarSolicitud(IN p_DNI varchar(20), IN p_Bici_Id varchar(20), in fecha_hoy datetime)
+BEGIN
+	-- declare comprobador VARCHAR(20) ;
+    -- set comprobador = (select Estado from bicicletas where Codigo = p_Bici_Id and Estado = 'Disponible');
+    
+    if (select Estado from bicicletas where Codigo = p_Bici_Id and Estado = 'Disponible') like 'Disponible' then
+    
+		Insert into solicitud_uso_bicicleta values (default,p_DNI,p_Bici_Id, fecha_hoy,'Aprobado');
+	else
+		Insert into solicitud_uso_bicicleta values (default,p_DNI,p_Bici_Id, fecha_hoy,'Denegado');
+	end if;
+END //
+DELIMITER ;
+CALL AprobarSolicitud('12345678A', 'B003', now());
+
+-- ========================================================================================================================================================
+-- ========================================================================================================================================================
+
+
+
 
 select * from servicio;
 select * from tiempo_uso;
@@ -264,6 +287,11 @@ select * from bicicletas;
 -- 3- Trigger para actualizar el saldo del usuario después de un alquiler. (1 punto)
 
 -- ESTE EJERCICIO ESTA FUSIONADO CON EL 2
+-- ESTE EJERCICIO ESTA FUSIONADO CON EL 2
+-- ESTE EJERCICIO ESTA FUSIONADO CON EL 2
+-- ESTE EJERCICIO ESTA FUSIONADO CON EL 2
+
+
 
 
 
@@ -337,33 +365,19 @@ select * from notificaciones;
 -- ========================================================================================================================================================
 -- ========================================================================================================================================================
 
--- Creacion tabla nueva Alquileres archivados
-CREATE TABLE IF NOT EXISTS alquileres_archivo (
-  idServicio INT NOT NULL,
-  usuario_DNI VARCHAR(9) NOT NULL,
-  bicicletas_Codigo VARCHAR(10) NOT NULL,
-  Fecha_inicio_servicio DATETIME NOT NULL,
-  Fecha_fin_servicio VARCHAR(45) NULL,
-  idTiempo_uso INT NOT NULL,
-  PRIMARY KEY (idServicio)
-) ENGINE = InnoDB;
-
--- ========================================================================================================================================================
-
 drop procedure if exists ArchivarAlquileresAntiguos;
 DELIMITER //
 CREATE PROCEDURE ArchivarAlquileresAntiguos()
 BEGIN
   -- Insertar los registros antiguos en la tabla de archivo
-  INSERT INTO alquileres_archivo (idServicio, usuario_DNI, bicicletas_Codigo, Fecha_inicio_servicio, Fecha_fin_servicio, idTiempo_uso)
-  
-  SELECT idServicio, usuario_DNI, bicicletas_Codigo, Fecha_inicio_servicio, Fecha_fin_servicio, idTiempo_uso
-  FROM Servicio
-  WHERE TIMESTAMPDIFF(YEAR, Fecha_inicio_servicio, NOW()) > 2;
+  INSERT INTO alquileres_archivo (idServicio, usuario_DNI, bicicletas_Codigo, Fecha_inicio_servicio, aprovacion)
+  SELECT idSolicitud, usuario_DNI, bicicletas_Codigo, Fecha_inicio_solicitud, Aprobacion
+  FROM solicitud_uso_bicicleta
+  WHERE TIMESTAMPDIFF(YEAR, Fecha_inicio_solicitud, NOW()) > 2;
   
   -- Eliminar los registros antiguos de la tabla original
-  DELETE FROM Servicio
-  WHERE TIMESTAMPDIFF(YEAR, Fecha_inicio_servicio, NOW()) > 2;
+  DELETE FROM solicitud_uso_bicicleta
+  WHERE TIMESTAMPDIFF(YEAR, Fecha_inicio_solicitud, NOW()) > 2;
 END //
 DELIMITER ;
 
@@ -382,7 +396,8 @@ DO
 
 -- PREVIAMENTE HAY QUE EJECUTAR LOS DOS TRIGGER PARA CREAR UN SERVICIO COMPLETO
 
-Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB(NOW(), INTERVAL 4 year));
+Insert into solicitud_uso_bicicleta values (default,'12345678A','B002', DATE_SUB(NOW(), INTERVAL 4 year), null);
 
 select * from alquileres_archivo;
+select * from solicitud_uso_bicicleta;
 select * from servicio;
